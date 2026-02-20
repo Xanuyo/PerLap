@@ -43,12 +43,12 @@ class CarSetupDialog(QDialog):
         btn_layout = QHBoxLayout()
         self._ok_btn = QPushButton("Registrar")
         self._ok_btn.setStyleSheet(
-            "background-color: #2d5a2d; padding: 8px; border: 1px solid #4a4a;"
+            "background-color: #2d5a2d; padding: 8px; border: 1px solid #4a4a4a;"
         )
         self._ok_btn.setEnabled(False)
         self._cancel_btn = QPushButton("Cancelar")
         self._cancel_btn.setStyleSheet(
-            "background-color: #5a2d2d; padding: 8px; border: 1px solid #4a4a;"
+            "background-color: #5a2d2d; padding: 8px; border: 1px solid #4a4a4a;"
         )
         btn_layout.addWidget(self._ok_btn)
         btn_layout.addWidget(self._cancel_btn)

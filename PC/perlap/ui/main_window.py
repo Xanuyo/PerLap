@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
         # Race controls (visible in race mode)
         self._btn_race = QPushButton("Iniciar Carrera")
         self._btn_race.setStyleSheet(
-            "background-color: #2d5a2d; padding: 6px 12px; border: 1px solid #4a4a;"
+            "background-color: #2d5a2d; padding: 6px 12px; border: 1px solid #4a4a4a;"
         )
         self._btn_race.clicked.connect(self._on_toggle_race)
         toolbar.addWidget(self._btn_race)
@@ -407,7 +407,7 @@ class MainWindow(QMainWindow):
 
             self._btn_race.setText("Finalizar Carrera")
             self._btn_race.setStyleSheet(
-                "background-color: #5a2d2d; padding: 6px 12px; border: 1px solid #4a4a;"
+                "background-color: #5a2d2d; padding: 6px 12px; border: 1px solid #4a4a4a;"
             )
             self._standings.update_standings(self._race.get_standings())
             self._status.showMessage("Carrera iniciada", 3000)
@@ -416,7 +416,7 @@ class MainWindow(QMainWindow):
             path = self._race_log.end_race()
             self._btn_race.setText("Iniciar Carrera")
             self._btn_race.setStyleSheet(
-                "background-color: #2d5a2d; padding: 6px 12px; border: 1px solid #4a4a;"
+                "background-color: #2d5a2d; padding: 6px 12px; border: 1px solid #4a4a4a;"
             )
             if path:
                 self._status.showMessage(f"Carrera guardada: {path}", 5000)
