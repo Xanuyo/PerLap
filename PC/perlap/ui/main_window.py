@@ -17,12 +17,14 @@ from ..models.events import LapEvent, EventType
 from ..detection.camera import CameraSource, DEFAULT_MIN_PIXEL_COUNT
 from ..detection.finish_line import FinishLine
 from ..detection.color_id import ColorCalibrator, SENSITIVITY_PRESETS, DEFAULT_SENSITIVITY
+from ..detection.arduino import ArduinoSource
 from .video_widget import VideoWidget
 from .standings import StandingsWidget, format_time
 from .car_setup import CarSetupDialog
 from .race_view import RaceViewWidget
 from .time_trial_widget import TimeTrialWidget
 from .ranking_widget import RankingWidget
+from .arduino_widget import ArduinoCalibrationWidget
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                            "config.json")
@@ -30,10 +32,14 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__fil
 MODE_RACE = 0
 MODE_TIME_TRIAL = 1
 
+SOURCE_CAMERA = "CAMERA"
+SOURCE_ARDUINO = "ARDUINO"
+
 
 class MainWindow(QMainWindow):
 
-    def __init__(self, race_manager: RaceManager, camera_source: CameraSource):
+    def __init__(self, race_manager: RaceManager, camera_source: CameraSource,
+                 arduino_source: ArduinoSource | None = None):
         super().__init__()
         self.setWindowTitle("PerLap - Cronometro de Vueltas RC")
         self.setMinimumSize(960, 600)
@@ -41,6 +47,7 @@ class MainWindow(QMainWindow):
 
         self._race = race_manager
         self._camera = camera_source
+        self._arduino = arduino_source or ArduinoSource()
         self._race_log = RaceLog()
         self._time_trial = TimeTrial()
         self._finish_line = FinishLine()
@@ -50,6 +57,7 @@ class MainWindow(QMainWindow):
         self._fps_count = 0
         self._racing = False
         self._mode = MODE_RACE
+        self._detection_source = SOURCE_CAMERA
 
         self._setup_ui()
         self._setup_toolbar()
@@ -73,8 +81,16 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
+        # Left panel: stacked (video / arduino calibration)
+        self._left_stack = QStackedWidget()
+
         self._video = VideoWidget()
-        splitter.addWidget(self._video)
+        self._left_stack.addWidget(self._video)  # index 0
+
+        self._arduino_widget = ArduinoCalibrationWidget()
+        self._left_stack.addWidget(self._arduino_widget)  # index 1
+
+        splitter.addWidget(self._left_stack)
 
         # Right panel: stacked widget that switches with mode
         self._right_stack = QStackedWidget()
@@ -128,6 +144,16 @@ class MainWindow(QMainWindow):
         )
         self.addToolBar(toolbar)
 
+        # Source selector
+        toolbar.addWidget(QLabel(" Fuente: "))
+        self._source_combo = QComboBox()
+        self._source_combo.addItem("Camara USB", SOURCE_CAMERA)
+        self._source_combo.addItem("Arduino Laser", SOURCE_ARDUINO)
+        self._source_combo.currentIndexChanged.connect(self._on_source_changed)
+        toolbar.addWidget(self._source_combo)
+
+        toolbar.addSeparator()
+
         # Mode selector
         toolbar.addWidget(QLabel(" Modo: "))
         self._mode_combo = QComboBox()
@@ -140,10 +166,12 @@ class MainWindow(QMainWindow):
 
         btn_reg = QPushButton("Registrar Auto")
         btn_reg.clicked.connect(self._on_register_car)
+        self._btn_register = btn_reg
         toolbar.addWidget(btn_reg)
 
         btn_line = QPushButton("Definir Meta")
         btn_line.clicked.connect(self._on_define_finish_line)
+        self._btn_line = btn_line
         toolbar.addWidget(btn_line)
 
         toolbar.addSeparator()
@@ -162,7 +190,9 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        toolbar.addWidget(QLabel(" Camara: "))
+        # --- Camera-specific controls ---
+        self._cam_label = QLabel(" Camara: ")
+        toolbar.addWidget(self._cam_label)
         self._cam_combo = QComboBox()
         for i in range(5):
             self._cam_combo.addItem(f"Dispositivo {i}", i)
@@ -171,8 +201,8 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        # --- Detection sensitivity controls ---
-        toolbar.addWidget(QLabel(" Sensibilidad: "))
+        self._sens_label = QLabel(" Sensibilidad: ")
+        toolbar.addWidget(self._sens_label)
         self._sens_combo = QComboBox()
         for name in SENSITIVITY_PRESETS:
             self._sens_combo.addItem(name)
@@ -182,7 +212,8 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        toolbar.addWidget(QLabel(" Min px: "))
+        self._px_label = QLabel(" Min px: ")
+        toolbar.addWidget(self._px_label)
         self._px_slider = QSlider(Qt.Orientation.Horizontal)
         self._px_slider.setRange(10, 500)
         self._px_slider.setValue(DEFAULT_MIN_PIXEL_COUNT)
@@ -205,6 +236,14 @@ class MainWindow(QMainWindow):
         self._px_spin.valueChanged.connect(self._on_min_px_changed)
         toolbar.addWidget(self._px_spin)
 
+        # Collect camera-only widgets for show/hide
+        self._camera_controls = [
+            self._cam_label, self._cam_combo,
+            self._sens_label, self._sens_combo,
+            self._px_label, self._px_slider, self._px_spin,
+            self._btn_register, self._btn_line,
+        ]
+
     def _setup_statusbar(self):
         self._status = QStatusBar()
         self._status.setStyleSheet("background: #2a2a2a; color: #aaa;")
@@ -219,6 +258,7 @@ class MainWindow(QMainWindow):
         self._status.addPermanentWidget(self._cars_label)
 
     def _connect_signals(self):
+        # Camera signals
         self._camera.frame_ready.connect(self._on_frame)
         self._camera.crossing_detected.connect(
             lambda car_id: self._on_crossing(car_id, "CAMERA")
@@ -227,6 +267,97 @@ class MainWindow(QMainWindow):
         self._video.color_sample_point.connect(self._on_color_sample)
         self._tt_widget.name_submitted.connect(self._on_tt_name_submitted)
         self._tt_widget.trial_reset.connect(self._on_tt_reset)
+
+        # Arduino signals
+        self._arduino.crossing_detected.connect(
+            lambda car_id: self._on_crossing(car_id, "ARDUINO")
+        )
+        self._arduino.ldr_value.connect(self._arduino_widget.update_ldr)
+        self._arduino.connection_changed.connect(self._on_arduino_connection)
+        self._arduino.threshold_changed.connect(
+            self._arduino_widget.set_confirmed_threshold
+        )
+        self._arduino.ready.connect(self._arduino_widget.set_baseline)
+        self._arduino.error_occurred.connect(
+            lambda msg: self._status.showMessage(f"Arduino: {msg}", 5000)
+        )
+
+        # Arduino widget signals
+        self._arduino_widget.threshold_changed.connect(self._arduino.set_threshold)
+        self._arduino_widget.laser_toggled.connect(self._arduino.set_laser)
+        self._arduino_widget.recalibrate_requested.connect(self._arduino.request_reset)
+        self._arduino_widget.port_changed.connect(self._on_arduino_port_changed)
+        self._arduino_widget.refresh_ports_requested.connect(self._refresh_arduino_ports)
+
+    # -----------------------------------------------------------
+    # Detection source switching
+    # -----------------------------------------------------------
+
+    def _on_source_changed(self, index: int):
+        source = self._source_combo.currentData()
+        self._detection_source = source
+
+        if source == SOURCE_ARDUINO:
+            self._camera.stop()
+            self._left_stack.setCurrentIndex(1)
+            self._source_label.setText("Fuente: Arduino Laser")
+
+            # Hide camera controls
+            for w in self._camera_controls:
+                w.setVisible(False)
+
+            # Refresh ports and start Arduino
+            self._refresh_arduino_ports()
+            port = self._arduino_widget.selected_port
+            if port:
+                self._arduino.port = port
+                self._arduino.start()
+                self._arduino.set_streaming(True)
+        else:
+            # Stop Arduino
+            if self._arduino.isRunning():
+                self._arduino.set_streaming(False)
+                self._arduino.stop()
+
+            self._left_stack.setCurrentIndex(0)
+            self._source_label.setText("Fuente: Camara USB")
+
+            # Show camera controls
+            for w in self._camera_controls:
+                w.setVisible(True)
+
+            self._camera.start()
+
+        self._save_config()
+
+    def _on_arduino_port_changed(self, port: str):
+        was_running = self._arduino.isRunning()
+        if was_running:
+            self._arduino.set_streaming(False)
+            self._arduino.stop()
+        self._arduino.port = port
+        if self._detection_source == SOURCE_ARDUINO and port:
+            self._arduino.start()
+            self._arduino.set_streaming(True)
+        self._save_config()
+
+    def _on_arduino_connection(self, connected: bool):
+        self._arduino_widget.set_connection_state(connected)
+        if connected:
+            self._status.showMessage("Arduino conectado", 3000)
+        else:
+            self._status.showMessage("Arduino desconectado", 3000)
+
+    def _refresh_arduino_ports(self):
+        ports = ArduinoSource.list_ports()
+        current = self._arduino.port
+        self._arduino_widget.update_ports(ports, current)
+        # Auto-select if no port set
+        if not current:
+            auto = ArduinoSource.find_arduino()
+            if auto:
+                self._arduino_widget.update_ports(ports, auto)
+                self._arduino.port = auto
 
     # -----------------------------------------------------------
     # Mode switching
@@ -388,21 +519,23 @@ class MainWindow(QMainWindow):
 
     def _on_toggle_race(self):
         if not self._racing:
-            active = self._race.get_active_cars()
-            if not active:
-                QMessageBox.warning(self, "Sin autos",
-                                    "Registra al menos un auto antes de iniciar.")
-                return
-            if not self._finish_line.defined:
-                QMessageBox.warning(self, "Sin meta",
-                                    "Define la linea de meta antes de iniciar.")
-                return
+            if self._detection_source == SOURCE_CAMERA:
+                active = self._race.get_active_cars()
+                if not active:
+                    QMessageBox.warning(self, "Sin autos",
+                                        "Registra al menos un auto antes de iniciar.")
+                    return
+                if not self._finish_line.defined:
+                    QMessageBox.warning(self, "Sin meta",
+                                        "Define la linea de meta antes de iniciar.")
+                    return
 
             self._racing = True
             self._race.reset()
             self._race_view.clear()
 
-            car_names = {cid: car.name for cid, car in active}
+            active = self._race.get_active_cars()
+            car_names = {cid: car.name for cid, car in active} if active else {0: "AUTO"}
             self._race_log.start_race(car_names)
 
             self._btn_race.setText("Finalizar Carrera")
@@ -443,7 +576,10 @@ class MainWindow(QMainWindow):
         self._camera.set_cars(entries)
 
     def _update_fps(self):
-        self._fps_label.setText(f"FPS: {self._fps_count}")
+        if self._detection_source == SOURCE_CAMERA:
+            self._fps_label.setText(f"FPS: {self._fps_count}")
+        else:
+            self._fps_label.setText("Arduino")
         self._fps_count = 0
 
     # -----------------------------------------------------------
@@ -479,6 +615,9 @@ class MainWindow(QMainWindow):
             "camera_index": self._camera.device_index,
             "sensitivity": ColorCalibrator.get_sensitivity(),
             "min_pixel_count": self._camera.min_pixel_count,
+            "detection_source": self._detection_source,
+            "arduino_port": self._arduino.port,
+            "arduino_threshold": self._arduino_widget.threshold,
             "cars": [],
         }
         for i, car in enumerate(self._race.cars):
@@ -525,6 +664,13 @@ class MainWindow(QMainWindow):
             self._px_slider.blockSignals(False)
             self._px_spin.blockSignals(False)
 
+        # Restore Arduino settings
+        if config.get("arduino_port"):
+            self._arduino.port = config["arduino_port"]
+
+        if config.get("arduino_threshold") is not None:
+            self._arduino_widget.set_confirmed_threshold(config["arduino_threshold"])
+
         for car_data in config.get("cars", []):
             from ..models.car import CarColor
             slot = car_data.pop("slot", 0)
@@ -538,9 +684,17 @@ class MainWindow(QMainWindow):
         self._cars_label.setText(f"Autos: {active}/6")
         self._standings.update_standings(self._race.get_standings())
 
+        # Restore detection source (must be last - triggers UI switch)
+        source = config.get("detection_source", SOURCE_CAMERA)
+        if source == SOURCE_ARDUINO:
+            self._source_combo.setCurrentIndex(1)  # triggers _on_source_changed
+
     def closeEvent(self, event):
         self._save_config()
         if self._race_log.active:
             self._race_log.end_race()
         self._camera.stop()
+        if self._arduino.isRunning():
+            self._arduino.set_streaming(False)
+            self._arduino.stop()
         event.accept()
