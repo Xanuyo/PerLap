@@ -15,6 +15,7 @@ class ArduinoSource(QThread):
     threshold_changed = Signal(int)     # confirmed threshold from Arduino
     ready = Signal(int, int)            # baseline, threshold on startup
     error_occurred = Signal(str)        # error message
+    test_result = Signal(int, int, int, bool)  # ldr_off, ldr_on, diff, laser_detected
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -42,6 +43,9 @@ class ArduinoSource(QThread):
 
     def request_reset(self):
         self.send_command("RESET")
+
+    def request_test(self):
+        self.send_command("TEST")
 
     def stop(self):
         self._running = False
@@ -185,6 +189,14 @@ class ArduinoSource(QThread):
             th = data.get("threshold", 0)
             self.ready.emit(bl, th)
             self.threshold_changed.emit(th)
+
+        elif event == "TEST_RESULT":
+            self.test_result.emit(
+                data.get("ldr_off", 0),
+                data.get("ldr_on", 0),
+                data.get("diff", 0),
+                data.get("laser_detected", False),
+            )
 
         elif event == "ERROR":
             self.error_occurred.emit(data.get("msg", "Error desconocido"))

@@ -97,6 +97,25 @@ void processCommand(const String& cmd) {
     streamOn = false;
     sendEvent("STREAM", "\"state\":\"OFF\"");
   }
+  else if (c == "TEST") {
+    // Diagnostico: apaga laser, lee LDR, prende laser, lee LDR, compara
+    digitalWrite(PIN_LASER, LOW);
+    delay(300);
+    int offVal = analogRead(PIN_LDR);
+    digitalWrite(PIN_LASER, HIGH);
+    delay(300);
+    int onVal = analogRead(PIN_LDR);
+    int diff = onVal - offVal;
+    // Restaurar estado original del laser
+    if (!laserOn) {
+      digitalWrite(PIN_LASER, LOW);
+    }
+    String data = "\"ldr_off\":" + String(offVal) +
+                  ",\"ldr_on\":" + String(onVal) +
+                  ",\"diff\":" + String(diff) +
+                  ",\"laser_detected\":" + (diff > 30 ? "true" : "false");
+    sendEvent("TEST_RESULT", data);
+  }
   else if (c == "PING") {
     sendEvent("PONG", "");
   }

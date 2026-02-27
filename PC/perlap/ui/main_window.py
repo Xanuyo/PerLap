@@ -286,8 +286,11 @@ class MainWindow(QMainWindow):
         self._arduino_widget.threshold_changed.connect(self._arduino.set_threshold)
         self._arduino_widget.laser_toggled.connect(self._arduino.set_laser)
         self._arduino_widget.recalibrate_requested.connect(self._arduino.request_reset)
+        self._arduino_widget.test_requested.connect(self._arduino.request_test)
         self._arduino_widget.port_changed.connect(self._on_arduino_port_changed)
         self._arduino_widget.refresh_ports_requested.connect(self._refresh_arduino_ports)
+
+        self._arduino.test_result.connect(self._arduino_widget.show_test_result)
 
     # -----------------------------------------------------------
     # Detection source switching

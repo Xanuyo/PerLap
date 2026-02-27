@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QSlider, QSpinBox, QComboBox,
-                               QProgressBar, QFrame)
+                               QProgressBar, QFrame, QTextEdit)
 from PySide6.QtCore import Qt, Signal
 
 
@@ -10,6 +10,7 @@ class ArduinoCalibrationWidget(QWidget):
     threshold_changed = Signal(int)
     laser_toggled = Signal(bool)
     recalibrate_requested = Signal()
+    test_requested = Signal()
     port_changed = Signal(str)
     refresh_ports_requested = Signal()
 
@@ -132,7 +133,28 @@ class ArduinoCalibrationWidget(QWidget):
         self._recal_btn.clicked.connect(self.recalibrate_requested.emit)
         btn_row.addWidget(self._recal_btn)
 
+        self._test_btn = QPushButton("Diagnostico")
+        self._test_btn.setStyleSheet(
+            "QPushButton { background: #4a3a0a; color: white; padding: 10px 20px; "
+            "border: 1px solid #6a5a2a; font-size: 14px; font-weight: bold; }"
+            "QPushButton:hover { background: #5a4a1a; }"
+        )
+        self._test_btn.clicked.connect(self.test_requested.emit)
+        btn_row.addWidget(self._test_btn)
+
         layout.addLayout(btn_row)
+
+        # ── Diagnostic result ──
+        self._diag_label = QLabel("")
+        self._diag_label.setStyleSheet(
+            "font-size: 13px; color: #ccc; padding: 8px; "
+            "background: #252525; border: 1px solid #444; border-radius: 4px;"
+        )
+        self._diag_label.setWordWrap(True)
+        self._diag_label.setMinimumHeight(60)
+        self._diag_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._diag_label.setVisible(False)
+        layout.addWidget(self._diag_label)
 
         # ── Port selector ──
         port_frame = QFrame()
@@ -234,6 +256,30 @@ class ArduinoCalibrationWidget(QWidget):
                     self._port_combo.setCurrentIndex(i)
                     break
         self._port_combo.blockSignals(False)
+
+    def show_test_result(self, ldr_off: int, ldr_on: int, diff: int, detected: bool):
+        self._diag_label.setVisible(True)
+        if detected:
+            self._diag_label.setStyleSheet(
+                "font-size: 13px; color: #0a0; padding: 8px; "
+                "background: #1a2a1a; border: 1px solid #0a0; border-radius: 4px;"
+            )
+            text = (
+                f"LASER DETECTADO POR LDR\n"
+                f"LDR con laser OFF: {ldr_off}  |  LDR con laser ON: {ldr_on}\n"
+                f"Diferencia: {diff} (el laser SI afecta al LDR)"
+            )
+        else:
+            self._diag_label.setStyleSheet(
+                "font-size: 13px; color: #f44; padding: 8px; "
+                "background: #2a1a1a; border: 1px solid #f44; border-radius: 4px;"
+            )
+            text = (
+                f"LASER NO DETECTADO\n"
+                f"LDR con laser OFF: {ldr_off}  |  LDR con laser ON: {ldr_on}\n"
+                f"Diferencia: {diff} (muy poca - revisar cableado del laser o alineacion)"
+            )
+        self._diag_label.setText(text)
 
     @property
     def threshold(self) -> int:
